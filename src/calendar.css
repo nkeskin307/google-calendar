@@ -1,0 +1,821 @@
+/* ============================================================================
+   calendar.css
+   ----------------------------------------------------------------------------
+   All the visual styling for the app lives in this one file. It's organized
+   top-to-bottom to roughly match the page layout:
+
+     1. Design tokens (:root)      - the shared color palette
+     2. Global/body styles          - page background, font
+     3. Header bar                  - top row (menu, title, Today, month, icons)
+     4. Left summary panel          - view-mode buttons + Next Up/Balance/etc.
+     5. Center calendar column      - My Calendars + Create, toolbar, the grid
+     6. Event cards                 - the colored blocks inside the grid
+     7. Create/Edit popup           - the modal form (EventPopup.jsx)
+
+   Nothing in here uses gradients, animations, or heavy shadows on purpose —
+   the whole design goal is "clean and simple", not flashy.
+   ============================================================================ */
+
+/* ----------------------------------------------------------------------------
+   1. DESIGN TOKENS
+   CSS custom properties (the --variable-name: value; syntax) defined once
+   here and reused everywhere with var(--variable-name). This means if we
+   ever want to change, say, the blue accent color, we only change it in
+   ONE place instead of hunting through the whole file.
+   ---------------------------------------------------------------------------- */
+:root {
+  --color-bg: #fafafa; /* off-white page/sidebar background */
+  --color-surface: #ffffff; /* pure white "card" surfaces (popup, header) */
+  --color-border: #eef0f2; /* very light gray hairline borders/dividers */
+  --color-text: #1f2328; /* main dark text color */
+  --color-text-muted: #70757a; /* secondary/lighter gray text (labels, times) */
+  --color-accent: #3b6fe0; /* the app's one "brand" blue */
+  --color-accent-soft: #eaf0fe; /* pale tint of the accent blue, for backgrounds */
+
+  /* One solid color per event category. These need enough contrast to sit
+     behind WHITE text on the event cards, so they're all medium-to-dark. */
+  --color-school: #3b6fe0; /* blue */
+  --color-personal: #2fa66b; /* green */
+  --color-work: #e08a2c; /* orange */
+  --color-social: #ca8a04; /* gold/yellow (bright yellow would fail contrast
+                               with white text, so this is a darker "mustard"
+                               yellow instead) */
+
+  --color-warm-soft: #fdf1e6; /* pale warm background, used by Week Mood card */
+
+  /* Week Mode button colors: soft beige/nude background with darker brown
+     text so the icon+label stay readable against it. */
+  --color-week-soft: #f5ede0;
+  --color-week-text: #8a6a45;
+
+  /* Weekend Mode button colors: soft pink background with a darker pink/
+     rose text color for the same reason as above. */
+  --color-weekend-soft: #fdeaf1;
+  --color-weekend-text: #b3466f;
+}
+
+/* ----------------------------------------------------------------------------
+   2. GLOBAL PAGE STYLES
+   ---------------------------------------------------------------------------- */
+body {
+  margin: 0; /* remove the browser's default 8px body margin */
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: Arial, Helvetica, sans-serif; /* plain system font, no web fonts */
+}
+
+/* The single top-level wrapper rendered by GoogleCalendar.jsx. A vertical
+   flexbox: the header sits on top, everything else (sidebar + calendar)
+   fills the remaining height below it. height: 100vh makes the whole app
+   fill the browser window exactly, so the calendar grid can scroll inside
+   its own area instead of the whole page scrolling. */
+.calendar-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ----------------------------------------------------------------------------
+   3. HEADER BAR
+   The row across the very top: menu icon + "Google Calendar" title on the
+   left, Today/arrows/month in the center, search/settings/profile icons on
+   the right. Laid out with justify-content: space-between so those three
+   groups spread out to the left/center/right edges.
+   ---------------------------------------------------------------------------- */
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-border); /* one thin divider line
+                                                     instead of a heavy box
+                                                     shadow */
+}
+
+/* All three header sections use the exact same "row of items with a gap"
+   layout, so they share one rule instead of being repeated three times. */
+.header-left,
+.header-center,
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.app-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.current-month {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* Generic small icon styling, shared by every Lucide icon rendered with
+   className="icon" throughout the header, sidebar, and toolbar (menu,
+   chevrons, search, settings, profile, plus sign, etc.). */
+.icon {
+  width: 18px;
+  height: 18px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+/* Overrides Chakra UI's default Button styling for the "Today" button.
+   !important is needed because Chakra applies its own inline-ish styles
+   via its theme system, which normally beat a plain CSS class. */
+.today-button {
+  border-color: var(--color-border) !important;
+  color: var(--color-text) !important;
+  border-radius: 20px !important; /* fully rounded "pill" shape */
+}
+
+/* ----------------------------------------------------------------------------
+   BODY LAYOUT (everything below the header)
+   .calendar-body is a horizontal flexbox with exactly two direct children:
+     1. .summary-panel  - the narrow left sidebar
+     2. .calendar-center - everything else (My Calendars + Create button
+                            row, then the toolbar and the week grid)
+   ---------------------------------------------------------------------------- */
+.calendar-body {
+  display: flex;
+  flex: 1; /* fill all remaining height below the header */
+  overflow: hidden; /* the grid scrolls internally, not the whole page */
+}
+
+/* ----------------------------------------------------------------------------
+   4. LEFT SUMMARY PANEL
+   Fixed narrow width. Contains, top to bottom: the 3 view-mode buttons
+   (Week/Weekend/Full Calendar), then Next Up, Weekly Balance, Busiest Day,
+   and Week Mood. overflow-y: auto lets it scroll on its own if the window
+   is short, without affecting the calendar grid next to it.
+   ---------------------------------------------------------------------------- */
+.summary-panel {
+  width: 200px;
+  background-color: var(--color-bg); /* slightly different tint than the
+                                          white calendar area, so the two
+                                          columns read as separate regions
+                                          without needing a heavy border */
+  padding: 20px 16px;
+  box-sizing: border-box; /* padding is included in the 200px width, so it
+                              doesn't make the panel wider than intended */
+  overflow-y: auto;
+}
+
+/* ---- View mode buttons (Week Mode / Weekend Mode / Full Calendar) ---- */
+
+/* Shared base look for all 3 mode buttons: same size, padding, rounding,
+   and spacing. Only the background/text color (below) and the icon differ
+   between them, plus whichever one is "active" gets a thicker border. */
+.mode-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%; /* stretches to fill the sidebar's width */
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--color-border); /* subtle border by default */
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-sizing: border-box; /* so border-width changes (see .mode-button-active
+                              below) don't shift the button's outer size */
+}
+
+/* Sizing for the Lucide icon rendered inside each mode button. No color is
+   set here on purpose — SVG icons from lucide-react use stroke="currentColor"
+   by default, so they automatically pick up whatever `color` the button
+   itself has (set by .mode-button-week/-weekend/-full below). */
+.mode-button-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.mode-button-week {
+  background-color: var(--color-week-soft);
+  color: var(--color-week-text);
+}
+
+.mode-button-weekend {
+  background-color: var(--color-weekend-soft);
+  color: var(--color-weekend-text);
+}
+
+/* Full Calendar deliberately reuses the app's existing blue accent tokens
+   instead of introducing a brand new color — one less color to keep track
+   of, and it still reads as visually distinct from the beige/pink modes. */
+.mode-button-full {
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+/* Whichever mode button matches the current viewMode gets this class added
+   (see GoogleCalendar.jsx). `currentColor` means "use this element's own
+   text color" — so the active Week Mode button gets a brown border, the
+   active Weekend Mode button gets a pink border, etc., all from ONE rule
+   instead of writing a separate "-active" variant per color. The border
+   also gets thicker (2px vs the default 1px) so "selected" is easy to spot
+   at a glance without resorting to a bright color or a shadow. */
+.mode-button-active {
+  border-width: 2px;
+  border-color: currentColor;
+}
+
+/* ---- Next Up / Weekly Balance / Busiest Day / Week Mood sections ---- */
+
+/* Generic wrapper around each of the 4 sidebar summary sections. Just adds
+   spacing between them — the actual "card" look (background, rounding)
+   comes from the separate .summary-card class below, which not every
+   section uses in the exact same way (Next Up has its own .next-up-card
+   instead, for example). */
+.summary-section {
+  margin-bottom: 12px;
+}
+
+/* The small uppercase label at the top of each section, e.g. "WEEKLY
+   BALANCE". display: flex here lets an icon (like the Smile icon on Week
+   Mood) sit inline next to the text, vertically centered. */
+.summary-section h4 {
+  display: flex;
+  align-items: center;
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+}
+
+/* Default paragraph styling inside a summary section (used for things like
+   "School 3", "Tuesday", "Balanced", etc.) */
+.summary-section p {
+  margin: 2px 0;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+/* Smaller, muted secondary line of text, e.g. "2 events" under Busiest
+   Day, or "8 events total" under Week Mood. !important overrides the more
+   generic .summary-section p rule above for just these specific lines. */
+.summary-subtext {
+  font-size: 12px !important;
+  color: var(--color-text-muted) !important;
+}
+
+/* The "card" look shared by Weekly Balance, Busiest Day, and Week Mood:
+   a white rounded rectangle with some inner padding. Busiest Day and Week
+   Mood additionally get a colored background from the two classes below
+   (added alongside .summary-card in the JSX, e.g.
+   className="summary-section summary-card summary-card-blue"). */
+.summary-card {
+  background-color: var(--color-surface);
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+
+/* Busiest Day card: very pale blue background (reuses the same soft-blue
+   token as the accent, so it doesn't need its own dedicated color). */
+.summary-card-blue {
+  background-color: var(--color-accent-soft);
+}
+
+/* Week Mood card: very pale warm/orange background. */
+.summary-card-warm {
+  background-color: var(--color-warm-soft);
+}
+
+/* The small Smile icon shown next to the "WEEK MOOD" label. Colored to
+   match the Work/warm palette so it feels tied to the card's warm
+   background, even though moods aren't tied to a real event category. */
+.mood-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  color: var(--color-work);
+}
+
+/* Next Up card: a plain white card whose LEFT border is colored to match
+   the upcoming event's category (see .next-up-school etc. below) — a
+   small, subtle way to hint at the category without repeating a colored
+   dot or badge. */
+.next-up-card {
+  background-color: var(--color-surface);
+  border-left: 3px solid var(--color-text-muted); /* fallback color, gets
+                                                        overridden by one of
+                                                        the 4 rules below */
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.next-up-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 2px;
+}
+
+/* One rule per category, each just overriding the left-border color set
+   above. GoogleCalendar.jsx picks the right one of these 4 class names by
+   lowercasing the event's category, e.g. category "School" becomes the
+   class "next-up-school". */
+.next-up-school {
+  border-left-color: var(--color-school);
+}
+
+.next-up-personal {
+  border-left-color: var(--color-personal);
+}
+
+.next-up-work {
+  border-left-color: var(--color-work);
+}
+
+.next-up-social {
+  border-left-color: var(--color-social);
+}
+
+/* Small colored circle used in two places: next to each line in the
+   Weekly Balance card, and next to each name in the My Calendars row.
+   display: inline-block + vertical-align: middle keeps it lined up nicely
+   with the text sitting right after it, even inside a plain <p> (not just
+   inside a flex container). */
+.calendar-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  flex-shrink: 0; /* never let it get squished if space is tight */
+}
+
+/* One color per category — these match --color-school/-personal/-work/
+   -social exactly, so a dot always matches its category's event-card
+   color everywhere in the app. */
+.dot-school {
+  background-color: var(--color-school);
+}
+
+.dot-personal {
+  background-color: var(--color-personal);
+}
+
+.dot-work {
+  background-color: var(--color-work);
+}
+
+.dot-social {
+  background-color: var(--color-social);
+}
+
+/* ----------------------------------------------------------------------------
+   5. CENTER CALENDAR COLUMN
+   Everything to the right of the sidebar: the top-right row (My Calendars
+   pill + Create button), the toolbar (Focus Mode + Free Time Finder), and
+   the week grid itself. This is a vertical flexbox so those pieces stack
+   top to bottom, with the grid area (.calendar-main) taking up all the
+   leftover space (flex: 1) since it's meant to be the biggest part of the
+   page.
+   ---------------------------------------------------------------------------- */
+.calendar-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--color-surface);
+}
+
+/* Row that holds My Calendars and the Create button side by side.
+   align-self: flex-end pushes this WHOLE row to the right edge of
+   .calendar-center (which is otherwise a column of full-width children) —
+   that's what keeps "My Calendars ... + Create" compact in the top-right
+   corner instead of stretching across the entire page width. */
+.top-right-row {
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 24px 0 0;
+}
+
+/* The "My Calendars" pill itself: a single horizontal row containing the
+   label plus one chip per calendar name. border-radius: 999px is a common
+   trick for "always fully rounded regardless of height" (a pill shape). */
+.calendars-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background-color: var(--color-bg);
+  border-radius: 999px;
+  padding: 6px 14px;
+}
+
+.calendars-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+/* Each "● School" / "● Personal" / etc. chip inside the My Calendars pill.
+   inline-flex lets the dot (a child .calendar-dot span) sit inline with
+   the text but still be vertically centered against it. */
+.calendar-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+/* The blue "+ Create" button in the top-right corner. Overrides Chakra's
+   default Button styling (hence !important) to get a simple filled-blue
+   pill shape that matches the rest of the app's flat, no-shadow look. */
+.create-button-top {
+  background-color: var(--color-accent) !important;
+  color: #ffffff !important;
+  border-radius: 999px !important;
+  font-weight: 600 !important;
+  padding: 0 14px !important;
+  height: 32px !important;
+}
+
+/* The Plus icon inside the Create button would otherwise inherit the
+   generic gray .icon color — this forces it to white so it's visible
+   against the solid blue button background. */
+.create-button-top .icon {
+  color: #ffffff;
+}
+
+/* The scrollable area holding the toolbar + week grid. flex: 1 makes it
+   fill all the vertical space .calendar-center has left after the
+   top-right row, and overflow: auto lets it scroll independently if the
+   grid is taller than the visible window. */
+.calendar-main {
+  flex: 1;
+  padding: 20px 24px;
+  overflow: auto;
+}
+
+/* Row containing the "Week View" heading on the left and the Focus Mode
+   chips + Free Time Finder toggle grouped together on the right. */
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.calendar-toolbar h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* Wraps the Focus Mode filter row and the Free Time Finder button together
+   so they sit as one visual group on the right side of the toolbar. */
+.toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Row of "All / School / Personal / Work / Social" filter chips. */
+.focus-filters {
+  display: flex;
+  gap: 6px;
+}
+
+/* Default (unselected) look for a Focus Mode chip: a light gray pill. */
+.filter-button {
+  background-color: var(--color-bg);
+  border: none;
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+/* Selected chip: solid blue background with white text, added alongside
+   .filter-button when its category matches the current selectedCategory
+   state in GoogleCalendar.jsx. */
+.filter-button-active {
+  background-color: var(--color-accent);
+  color: #ffffff;
+}
+
+/* "Show Free Time" toggle button. Uses the exact same base pill shape as
+   the Focus Mode chips (background-color, border, radius, padding, font)
+   so it visually belongs to the same toolbar group, even though it's a
+   completely separate on/off switch rather than a multi-choice filter. */
+.free-time-toggle {
+  background-color: var(--color-bg);
+  border: none;
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+/* When Free Time Finder is turned on, the toggle button itself turns
+   green — the same green used for the "Personal" category and for the
+   free-slot highlight tint below, tying the toggle visually to what it's
+   highlighting. */
+.free-time-toggle-active {
+  background-color: var(--color-personal);
+  color: #ffffff;
+}
+
+/* ----------------------------------------------------------------------------
+   THE WEEK GRID
+   Two pieces sit on top of each other:
+     .week-header - the row of day names/dates at the top
+     .week-grid   - the actual hour-by-hour grid below it
+   Both use the EXACT SAME grid-template-columns value (a 60px time column
+   plus one column per visible day) so their columns always line up
+   perfectly — that shared value is computed once in GoogleCalendar.jsx as
+   `gridColumns` and applied as an inline style to both elements, which is
+   why you won't find a fixed column count hardcoded in this CSS file for
+   either of them (see the inline style="" usage instead).
+   ---------------------------------------------------------------------------- */
+
+/* Fallback grid-template-columns for 7 columns (a normal Mon-Sun week).
+   This value gets overridden by the inline style GoogleCalendar.jsx sets
+   whenever the visible day count is different (5 for Week Mode's Mon-Fri,
+   2 for Weekend Mode's Sat-Sun) — but keeping a sane default here means
+   the grid still looks reasonable even before React finishes its first
+   render, or if that inline style were ever removed. */
+.week-header {
+  display: grid;
+  grid-template-columns: 60px repeat(7, 1fr);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* One "Mon / Sep 14" style header cell per visible day. Stacked vertically
+   (day name on top, date underneath) and centered. */
+.day-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  white-space: nowrap; /* keeps "Sep 14" on one line even in a narrow column */
+}
+
+/* The day name (first line) is bolder/darker than the date underneath it. */
+.day-header span:first-child {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Whichever day matches TODAY_DAY_NAME in GoogleCalendar.jsx gets this
+   class added to its header cell — a soft blue tint plus rounded top
+   corners, just enough to draw the eye without a bright highlight color. */
+.day-header-today {
+  background-color: var(--color-accent-soft);
+  border-radius: 10px 10px 0 0;
+}
+
+.day-header-today span:first-child {
+  color: var(--color-accent);
+}
+
+/* Same fallback column layout as .week-header above — see the big comment
+   before .week-header for why 7 columns is just a default, not the only
+   possible value. */
+.week-grid {
+  display: grid;
+  grid-template-columns: 60px repeat(7, 1fr);
+}
+
+/* Left-hand column listing "8 AM", "9 AM", ... down to "6 PM". */
+.time-column {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each hour label. height: 48px is important — GoogleCalendar.jsx's
+   HOUR_HEIGHT_PX constant must match this number exactly, because that's
+   the pixel value used to calculate how tall/where each event card should
+   be drawn. If you ever change this height, update HOUR_HEIGHT_PX too. */
+.time-slot {
+  height: 48px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: right;
+  padding-right: 8px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* One column per visible day, stacked as a vertical flexbox of hour cells.
+   position: relative is the key line here: it makes this element the
+   "positioning context" for any .event-card placed inside it, since event
+   cards use position: absolute and need SOMETHING nearby to be absolute
+   *relative to* — without this, they'd position themselves relative to
+   the whole page instead of just this one day's column. */
+.day-column {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--color-border);
+  position: relative;
+}
+
+/* Same "today" highlight idea as .day-header-today, but for the column of
+   hour cells underneath the header instead of the header cell itself. */
+.day-column-today {
+  background-color: var(--color-accent-soft);
+}
+
+/* One empty 1-hour clickable cell. Clicking it opens the create-event
+   popup for that exact day + hour (see handleSlotClick in
+   GoogleCalendar.jsx). Height must match .time-slot's 48px so hour rows
+   line up between the time column and every day column. */
+.hour-cell {
+  height: 48px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.hour-cell:hover {
+  background-color: var(--color-bg); /* subtle hover feedback, no shadow/animation */
+}
+
+/* Free Time Finder highlight: applied on top of .hour-cell (in addition
+   to it, not instead of it) whenever that hour has no event AND the
+   toggle is on. Uses a translucent green (rgba with low alpha) rather
+   than a new solid color, so it reads as a soft "tint" layered over the
+   normal cell rather than a bold new color block. */
+.free-slot {
+  background-color: rgba(47, 166, 107, 0.1);
+}
+
+.free-slot:hover {
+  background-color: rgba(47, 166, 107, 0.18); /* slightly stronger on hover */
+}
+
+/* ----------------------------------------------------------------------------
+   6. EVENT CARDS
+   Each event is rendered as one of these, absolutely positioned inside its
+   .day-column parent. The exact `top` and `height` values are calculated
+   in GoogleCalendar.jsx from the event's startTime/endTime and passed in
+   as an inline style — this CSS only handles everything ELSE about how an
+   event card looks (color, rounding, padding, text).
+   ---------------------------------------------------------------------------- */
+.event-card {
+  position: absolute;
+  left: 3px;
+  right: 3px; /* left+right instead of a fixed width lets the card fill
+                 whatever width its day-column happens to have, so it still
+                 looks right whether there are 2, 5, or 7 columns visible */
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: #ffffff; /* white text needs to stay readable against every one of
+                      the 4 solid category background colors below */
+  overflow: hidden; /* clips text that's too long for a short/narrow event */
+  cursor: pointer; /* clicking an event opens it in the edit popup */
+  box-sizing: border-box;
+}
+
+/* Bold event name, truncated with "..." if it doesn't fit on one line. */
+.event-title {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Smaller, slightly transparent time range shown under the title. */
+.event-time {
+  font-size: 11px;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* One background color per category. GoogleCalendar.jsx builds the class
+   name dynamically as `event-${event.category.toLowerCase()}`, so an
+   event with category "Work" gets className "event-work" and picks up
+   this exact color. */
+.event-school {
+  background-color: var(--color-school);
+}
+
+.event-personal {
+  background-color: var(--color-personal);
+}
+
+.event-work {
+  background-color: var(--color-work);
+}
+
+.event-social {
+  background-color: var(--color-social);
+}
+
+/* Focus Mode: applied ON TOP OF an event-category class (not instead of
+   it) whenever that event's category doesn't match the selected filter.
+   Lowering opacity fades it out while keeping it fully visible/clickable,
+   rather than hiding it completely — so the rest of the week's layout
+   doesn't jump around when you switch filters. */
+.event-dimmed {
+  opacity: 0.3;
+}
+
+/* ----------------------------------------------------------------------------
+   7. CREATE/EDIT POPUP (EventPopup.jsx)
+   A simple centered modal: a semi-transparent dark backdrop covering the
+   whole screen, with a white rounded card floating in the middle of it.
+   ---------------------------------------------------------------------------- */
+
+/* The dark backdrop. position: fixed + all 4 offsets at 0 makes it cover
+   the entire viewport regardless of scroll position. Centers its one
+   child (.popup-content) both horizontally and vertically with flexbox. */
+.popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.3); /* 30% black tint, not fully opaque,
+                                             so the calendar is still faintly
+                                             visible behind the popup */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The actual white card containing the form. Fixed width so the form
+   layout stays predictable regardless of field content. */
+.popup-content {
+  background-color: var(--color-surface);
+  border-radius: 16px;
+  padding: 20px;
+  width: 280px;
+}
+
+.popup-content h3 {
+  margin-top: 0; /* removes default browser spacing above the heading, so
+                     it sits flush with the card's own padding */
+}
+
+/* Row of small Quick Add shortcut buttons (Class/Study/Gym/Meeting) at
+   the top of the form, kept visually secondary/smaller than the real form
+   fields below them. */
+.quick-add-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+/* Wraps each <label> + its input/select/textarea as one vertical block:
+   a small gray field name on top, the actual control underneath. */
+.popup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
+}
+
+/* Styling for the plain HTML <select> elements (Day, Category) — these
+   aren't Chakra components, so they need their own manual styling to
+   match the look of the Chakra <Input>/<Textarea> fields next to them. */
+.popup-field select {
+  height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0 8px;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+/* Chakra's <Input> and <Textarea> components come with their own default
+   border styling from Chakra's theme, which normally wins over a plain
+   CSS rule — !important forces our rounded, light-bordered look on top of
+   that default, so all the form fields (native <select> and Chakra
+   <Input>/<Textarea> alike) end up looking consistent with each other. */
+.popup-field input,
+.popup-field textarea {
+  border-radius: 8px !important;
+  border-color: var(--color-border) !important;
+}
+
+/* Bottom row of Cancel/Save/Update/Delete buttons, right-aligned. */
+.popup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
